@@ -1,0 +1,497 @@
+// This is your Prisma schema file for the Restaurant POS System
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model with role-based access
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  password       String
+  firstName      String
+  lastName       String
+  role           Role      @default(SERVER)
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  profileImage   String?
+  orders         Order[]
+  payments       Payment[]
+  restaurant     Restaurant? @relation(fields: [restaurantId], references: [id])
+  restaurantId   String?
+  sentNotifications Notification[] @relation("SenderNotifications")
+  receivedNotifications Notification[] @relation("RecipientNotifications")
+  sessions       UserSession[]
+  shifts         Shift[]
+  timeEntries    TimeEntry[]
+  giftCardTransactions GiftCardTransaction[]
+  voucherRedemptions  VoucherRedemption[]
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SERVER
+  KITCHEN
+}
+
+// Restaurant model for multi-branch support
+model Restaurant {
+  id          String    @id @default(uuid())
+  name        String
+  address     String
+  phone       String
+  email       String?
+  taxRate     Float     @default(0)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  users       User[]
+  tables      Table[]
+  orders      Order[]
+  menuItems   MenuItem[]
+  categories  Category[]
+  reservations Reservation[]
+  notifications Notification[]
+  sessions    UserSession[]
+  shifts      Shift[]
+  timeEntries TimeEntry[]
+  giftCards   GiftCard[]
+  vouchers    Voucher[]
+}
+
+// User session tracking
+model UserSession {
+  id           String    @id @default(uuid())
+  ipAddress    String?
+  userAgent    String?
+  loginTime    DateTime  @default(now())
+  logoutTime   DateTime?
+  isActive     Boolean   @default(true)
+  user         User      @relation(fields: [userId], references: [id])
+  userId       String
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id])
+  restaurantId String?
+
+  @@index([userId])
+}
+
+// Table management
+model Table {
+  id           String    @id @default(uuid())
+  number       Int
+  capacity     Int
+  status       TableStatus @default(AVAILABLE)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  orders       Order[]
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+  reservations Reservation[] @relation("TableReservations")
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  MAINTENANCE
+}
+
+// Category for menu organization
+model Category {
+  id           String    @id @default(uuid())
+  name         String
+  description  String?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  menuItems    MenuItem[]
+  parentId     String?
+  parent       Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children     Category[] @relation("CategoryHierarchy")
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+}
+
+// Menu items
+model MenuItem {
+  id           String    @id @default(uuid())
+  name         String
+  description  String?
+  price        Float
+  cost         Float?
+  image        String?
+  available    Boolean   @default(true)
+  preparationTime Int?    // in minutes
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  category     Category  @relation(fields: [categoryId], references: [id])
+  categoryId   String
+  modifierGroups ModifierGroup[]
+  orderItems   OrderItem[]
+  inventoryUsages InventoryUsage[]
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId String
+}
+
+// Modifier groups (e.g., "Spice Level", "Toppings")
+model ModifierGroup {
+  id           String    @id @default(uuid())
+  name         String
+  required     Boolean   @default(false)
+  multiSelect  Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  menuItems    MenuItem[]
+  modifiers    Modifier[]
+}
+
+// Individual modifiers (e.g., "Extra Hot", "Cheese")
+model Modifier {
+  id              String    @id @default(uuid())
+  name            String
+  price           Float     @default(0)
+  available       Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  modifierGroup   ModifierGroup @relation(fields: [modifierGroupId], references: [id])
+  modifierGroupId String
+  orderItemModifiers OrderItemModifier[]
+}
+
+// Order management
+model Order {
+  id             String    @id @default(uuid())
+  orderNumber    String    @unique
+  status         OrderStatus @default(PENDING)
+  type           OrderType @default(DINE_IN)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  subtotal       Float
+  tax            Float
+  tip            Float?
+  total          Float
+  notes          String?
+  table          Table?     @relation(fields: [tableId], references: [id])
+  tableId        String?
+  user           User       @relation(fields: [userId], references: [id])
+  userId         String
+  customer       Customer?  @relation(fields: [customerId], references: [id])
+  customerId     String?
+  orderItems     OrderItem[]
+  payments       Payment[]
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId   String
+  voucherRedemptions VoucherRedemption[]
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  SERVED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEOUT
+  DELIVERY
+  ONLINE
+}
+
+// Order items (individual items in an order)
+model OrderItem {
+  id           String    @id @default(uuid())
+  quantity     Int
+  price        Float
+  notes        String?
+  status       OrderItemStatus @default(PENDING)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  order        Order     @relation(fields: [orderId], references: [id])
+  orderId      String
+  menuItem     MenuItem  @relation(fields: [menuItemId], references: [id])
+  menuItemId   String
+  modifiers    OrderItemModifier[]
+}
+
+enum OrderItemStatus {
+  PENDING
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+// Order item modifiers (e.g., "Extra spicy", "No onions")
+model OrderItemModifier {
+  id           String    @id @default(uuid())
+  price        Float
+  createdAt    DateTime  @default(now())
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id])
+  orderItemId  String
+  modifier     Modifier  @relation(fields: [modifierId], references: [id])
+  modifierId   String
+
+  @@unique([orderItemId, modifierId])
+}
+
+// Payment processing
+model Payment {
+  id           String    @id @default(uuid())
+  amount       Float
+  method       PaymentMethod
+  status       PaymentStatus @default(PENDING)
+  transactionId String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  order        Order     @relation(fields: [orderId], references: [id])
+  orderId      String
+  user         User      @relation(fields: [userId], references: [id])
+  userId       String
+  giftCardTransactions GiftCardTransaction[]
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  MOBILE_PAYMENT
+  GIFT_CARD
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// Customer management
+model Customer {
+  id           String    @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String?   @unique
+  phone        String?
+  loyaltyPoints Int      @default(0)
+  birthdate    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  orders       Order[]
+  reservations Reservation[]
+  giftCards    GiftCard[]
+}
+
+// Inventory management
+model InventoryItem {
+  id           String    @id @default(uuid())
+  name         String
+  description  String?
+  unitType     String    // e.g., kg, liter, piece
+  quantity     Float
+  reorderLevel Float?
+  cost         Float?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  inventoryUsages InventoryUsage[]
+}
+
+// Relationship between menu items and inventory items
+model InventoryUsage {
+  id             String    @id @default(uuid())
+  quantity       Float
+  menuItem       MenuItem  @relation(fields: [menuItemId], references: [id])
+  menuItemId     String
+  inventoryItem  InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  inventoryItemId String
+
+  @@unique([menuItemId, inventoryItemId])
+}
+
+// Reservation management
+model Reservation {
+  id              String    @id @default(uuid())
+  reservationTime DateTime
+  partySize       Int
+  status          ReservationStatus @default(CONFIRMED)
+  specialRequests String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  customerId      String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId    String
+  tables          Table[]   @relation("TableReservations")
+}
+
+enum ReservationStatus {
+  CONFIRMED
+  CANCELLED
+  SEATED
+  COMPLETED
+  NO_SHOW
+}
+
+// Notification system
+model Notification {
+  id           String    @id @default(uuid())
+  title        String
+  message      String
+  isRead       Boolean   @default(false)
+  priority     NotificationPriority @default(MEDIUM)
+  type         NotificationType?
+  link         String?   // Optional link to navigate to
+  createdAt    DateTime  @default(now())
+  sender       User?     @relation("SenderNotifications", fields: [senderId], references: [id])
+  senderId     String?
+  recipient    User?     @relation("RecipientNotifications", fields: [recipientId], references: [id])
+  recipientId  String?
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id])
+  restaurantId String?
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum NotificationType {
+  ORDER
+  INVENTORY
+  RESERVATION
+  PAYMENT
+  SYSTEM
+  OTHER
+}
+
+// Employee Shift Management
+model Shift {
+  id             String    @id @default(uuid())
+  startTime      DateTime
+  endTime        DateTime?
+  status         ShiftStatus @default(IN_PROGRESS)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id])
+  userId         String
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId   String
+  timeEntries    TimeEntry[]
+}
+
+enum ShiftStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model TimeEntry {
+  id             String    @id @default(uuid())
+  clockInTime    DateTime
+  clockOutTime   DateTime?
+  type           TimeEntryType @default(REGULAR)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  shift          Shift     @relation(fields: [shiftId], references: [id])
+  shiftId        String
+  user           User      @relation(fields: [userId], references: [id])
+  userId         String
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId   String
+}
+
+enum TimeEntryType {
+  REGULAR
+  BREAK
+  TRAINING
+  OVERTIME
+}
+
+// Gift Card and Voucher Management
+model GiftCard {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  initialBalance Float
+  currentBalance Float
+  isActive       Boolean   @default(true)
+  expiryDate     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  issuedTo       Customer? @relation(fields: [customerId], references: [id])
+  customerId     String?
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId   String
+  transactions   GiftCardTransaction[]
+}
+
+model GiftCardTransaction {
+  id             String    @id @default(uuid())
+  amount         Float
+  type           TransactionType
+  notes          String?
+  createdAt      DateTime  @default(now())
+  giftCard       GiftCard  @relation(fields: [giftCardId], references: [id])
+  giftCardId     String
+  payment        Payment?  @relation(fields: [paymentId], references: [id])
+  paymentId      String?
+  user           User      @relation(fields: [userId], references: [id])
+  userId         String
+}
+
+enum TransactionType {
+  ISSUE
+  REDEEM
+  REFUND
+  LOAD
+}
+
+model Voucher {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  type           VoucherType
+  value          Float
+  minPurchase    Float     @default(0)
+  isActive       Boolean   @default(true)
+  startDate      DateTime
+  expiryDate     DateTime
+  usageLimit     Int?      // null means unlimited
+  usageCount     Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurantId   String
+  redemptions    VoucherRedemption[]
+}
+
+enum VoucherType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_ITEM
+}
+
+model VoucherRedemption {
+  id             String    @id @default(uuid())
+  createdAt      DateTime  @default(now())
+  voucher        Voucher   @relation(fields: [voucherId], references: [id])
+  voucherId      String
+  order          Order     @relation(fields: [orderId], references: [id])
+  orderId        String
+  user           User      @relation(fields: [userId], references: [id])
+  userId         String
+}
